@@ -57,6 +57,16 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        "luxury-gold": "hsl(var(--luxury-gold))",
+      },
+      backgroundImage: {
+        "gradient-hero": "var(--gradient-hero)",
+        "gradient-luxury": "var(--gradient-luxury)",
+        "gradient-fashion": "var(--gradient-fashion)",
+      },
+      boxShadow: {
+        card: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+        luxury: "0 10px 30px -10px rgba(0, 0, 0, 0.3)",
       },
       borderRadius: {
         lg: "var(--radius)",
