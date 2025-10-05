@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,18 +11,26 @@ import { ArrowLeft, Sparkles } from "lucide-react";
 const Auth = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
 
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get("email") as string;
+
     // Simulate login
     setTimeout(() => {
+      localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("userEmail", email);
+      
       toast({
         title: "Login Successful!",
         description: "Welcome back to Fashion Forward.",
       });
       setIsLoading(false);
+      navigate("/");
     }, 1000);
   };
 
@@ -30,13 +38,22 @@ const Auth = () => {
     e.preventDefault();
     setIsLoading(true);
 
+    const formData = new FormData(e.currentTarget);
+    const name = formData.get("name") as string;
+    const email = formData.get("email") as string;
+
     // Simulate signup
     setTimeout(() => {
+      localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("userName", name);
+      localStorage.setItem("userEmail", email);
+      
       toast({
         title: "Account Created!",
-        description: "Welcome to Fashion Forward. Please check your email to verify your account.",
+        description: "Welcome to Fashion Forward.",
       });
       setIsLoading(false);
+      navigate("/");
     }, 1000);
   };
 
@@ -82,6 +99,7 @@ const Auth = () => {
                       <Label htmlFor="login-email">Email</Label>
                       <Input
                         id="login-email"
+                        name="email"
                         type="email"
                         placeholder="your@email.com"
                         required
@@ -91,6 +109,7 @@ const Auth = () => {
                       <Label htmlFor="login-password">Password</Label>
                       <Input
                         id="login-password"
+                        name="password"
                         type="password"
                         placeholder="••••••••"
                         required
@@ -122,6 +141,7 @@ const Auth = () => {
                       <Label htmlFor="signup-name">Full Name</Label>
                       <Input
                         id="signup-name"
+                        name="name"
                         type="text"
                         placeholder="John Doe"
                         required
@@ -131,6 +151,7 @@ const Auth = () => {
                       <Label htmlFor="signup-email">Email</Label>
                       <Input
                         id="signup-email"
+                        name="email"
                         type="email"
                         placeholder="your@email.com"
                         required
@@ -140,6 +161,7 @@ const Auth = () => {
                       <Label htmlFor="signup-password">Password</Label>
                       <Input
                         id="signup-password"
+                        name="password"
                         type="password"
                         placeholder="••••••••"
                         required
@@ -149,6 +171,7 @@ const Auth = () => {
                       <Label htmlFor="signup-confirm-password">Confirm Password</Label>
                       <Input
                         id="signup-confirm-password"
+                        name="confirm-password"
                         type="password"
                         placeholder="••••••••"
                         required
@@ -167,9 +190,6 @@ const Auth = () => {
             </TabsContent>
           </Tabs>
 
-          <p className="text-center text-sm text-muted-foreground mt-4">
-            Note: Backend authentication is not yet connected. This is a UI preview.
-          </p>
         </div>
       </div>
     </div>

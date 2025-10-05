@@ -1,10 +1,37 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Ruler, Palette, Sparkles, LogIn } from "lucide-react";
+import { Ruler, Palette, Sparkles, LogIn, User, LogOut } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import fashionHero from "@/assets/fashion-hero.jpg";
+import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userName, setUserName] = useState("");
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const authStatus = localStorage.getItem("isAuthenticated") === "true";
+    const storedName = localStorage.getItem("userName") || localStorage.getItem("userEmail") || "";
+    setIsAuthenticated(authStatus);
+    setUserName(storedName);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("isAuthenticated");
+    localStorage.removeItem("userName");
+    localStorage.removeItem("userEmail");
+    setIsAuthenticated(false);
+    setUserName("");
+    toast({
+      title: "Logged out",
+      description: "You have been successfully logged out.",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <section className="relative overflow-hidden min-h-screen">
@@ -19,13 +46,37 @@ const Index = () => {
         />
 
         <div className="relative z-10 container mx-auto px-4 py-16 sm:py-24 lg:py-32">
-          <div className="absolute top-4 right-4">
-            <Link to="/auth">
-              <Button variant="secondary" size="sm" className="gap-2">
-                <LogIn className="w-4 h-4" />
-                Login
-              </Button>
-            </Link>
+          <div className="absolute top-4 right-4 flex gap-2">
+            {!isAuthenticated ? (
+              <>
+                <Link to="/auth">
+                  <Button variant="secondary" size="sm" className="gap-2">
+                    <LogIn className="w-4 h-4" />
+                    Login
+                  </Button>
+                </Link>
+                <Link to="/auth">
+                  <Button variant="default" size="sm" className="gap-2">
+                    Sign Up
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm" className="gap-2">
+                    <User className="w-4 h-4" />
+                    <span className="hidden sm:inline">{userName}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleLogout}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
           
           <div className="text-center text-primary-foreground">
@@ -45,7 +96,24 @@ const Index = () => {
 
       <section className="py-12 sm:py-16 lg:py-20 px-4">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid md:grid-cols-2 gap-6 lg:gap-8">
+          {!isAuthenticated ? (
+            <div className="text-center max-w-2xl mx-auto">
+              <h2 className="text-3xl font-bold mb-4 text-foreground">
+                Welcome to Fashion Forward
+              </h2>
+              <p className="text-lg text-muted-foreground mb-6">
+                Our AI-powered platform helps you discover your perfect fit and personal color palette. 
+                Sign up or login to unlock personalized fashion recommendations tailored just for you.
+              </p>
+              <Link to="/auth">
+                <Button size="lg" className="gap-2">
+                  <LogIn className="w-5 h-5" />
+                  Get Started
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-6 lg:gap-8">
             <Card className="group hover:shadow-luxury transition-all duration-500 transform hover:-translate-y-2 bg-card border-0 overflow-hidden">
               <div className="absolute inset-0 bg-gradient-fashion opacity-0 group-hover:opacity-10 transition-opacity duration-500" />
               <CardHeader className="relative z-10 text-center pb-6">
@@ -108,6 +176,7 @@ const Index = () => {
               </CardContent>
             </Card>
           </div>
+          )}
         </div>
       </section>
 
