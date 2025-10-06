@@ -1,22 +1,32 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Ruler, Palette, Sparkles, LogIn, User, LogOut } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import fashionHero from "@/assets/fashion-hero.jpg";
 import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userName, setUserName] = useState("");
+  const [profilePic, setProfilePic] = useState("");
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const authStatus = localStorage.getItem("isAuthenticated") === "true";
     const storedName = localStorage.getItem("userName") || "";
+    const profile = localStorage.getItem('userProfile');
+    
     setIsAuthenticated(authStatus);
     setUserName(storedName);
+    
+    if (profile) {
+      const profileData = JSON.parse(profile);
+      setProfilePic(profileData.profilePic || '');
+    }
   }, []);
 
   const handleLogout = () => {
@@ -25,10 +35,19 @@ const Index = () => {
     localStorage.removeItem("userEmail");
     setIsAuthenticated(false);
     setUserName("");
+    setProfilePic("");
     toast({
       title: "Logged out",
       description: "You have been successfully logged out.",
     });
+  };
+
+  const getInitials = () => {
+    if (!userName) return '?';
+    const names = userName.split(' ');
+    return names.length > 1 
+      ? `${names[0][0]}${names[1][0]}`.toUpperCase()
+      : names[0][0].toUpperCase();
   };
 
   return (
@@ -63,12 +82,21 @@ const Index = () => {
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm" className="gap-2">
-                    <User className="w-4 h-4" />
-                    <span className="hidden sm:inline">{userName}</span>
+                  <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                    <Avatar>
+                      <AvatarImage src={profilePic} alt={userName} />
+                      <AvatarFallback>{getInitials()}</AvatarFallback>
+                    </Avatar>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-card border border-border">
+                <DropdownMenuContent align="end" className="w-56 bg-card border border-border">
+                  <DropdownMenuItem disabled className="font-semibold">
+                    {userName}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/profile')} className="cursor-pointer">
+                    <User className="w-4 h-4 mr-2" />
+                    Profile
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
                     <LogOut className="w-4 h-4 mr-2" />
                     Logout

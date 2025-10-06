@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Pose, POSE_LANDMARKS, POSE_CONNECTIONS } from '@mediapipe/pose';
+import { Pose, POSE_CONNECTIONS } from '@mediapipe/pose';
 import { Camera } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import { estimateSize } from '@/data/sizeChart';
@@ -33,13 +33,13 @@ const PoseDetection = () => {
   const F = 500;
   const REAL_EYE_DIST = 6.3;
   const SCALING_FACTOR = 1.48;
-  const STABILITY_TOLERANCE = 5.0;
-  const STABILITY_DURATION = 2000;
+  const STABILITY_TOLERANCE = 3.0;
+  const STABILITY_DURATION = 5000;
 
   const checkStability = (measurements: number[], tolerance = STABILITY_TOLERANCE): boolean => {
-    if (measurements.length < 6) return false;
+    if (measurements.length < 8) return false;
 
-    const recent = measurements.slice(-6);
+    const recent = measurements.slice(-8);
     const avg = recent.reduce((sum, val) => sum + val, 0) / recent.length;
     const variance = recent.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / recent.length;
     const stdDev = Math.sqrt(variance);
@@ -306,7 +306,7 @@ const PoseDetection = () => {
             <ul className="text-sm space-y-1 text-muted-foreground">
               <li>• Stand facing the camera with arms at your sides</li>
               <li>• Make sure your full torso is visible (shoulders to hips)</li>
-              <li>• Stay still for 2 seconds to lock in measurements</li>
+              <li>• Stay still for 5 seconds to lock in measurements</li>
               <li>• Move back if you see a warning message</li>
               {timeRemaining > 0 && timeRemaining < STABILITY_DURATION && (
                 <li className="text-primary font-semibold">
@@ -377,7 +377,7 @@ const PoseDetection = () => {
                 </div>
 
                 <p className="text-center text-sm text-muted-foreground">
-                  Measurements locked after detecting stillness for 2 seconds.
+                  Measurements locked after detecting stillness for 5 seconds.
                 </p>
               </div>
 

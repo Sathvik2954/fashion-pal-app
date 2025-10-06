@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import ColorAnalysis from "./pages/ColorAnalysis";
 import SizePrediction from "./pages/SizePrediction";
 import Auth from "./pages/Auth";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/color-analysis" element={<ColorAnalysis />} />
           <Route path="/size-prediction" element={<SizePrediction />} />
           <Route path="/auth" element={<Auth />} />
+          <Route path="/profile" element={<Profile />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
