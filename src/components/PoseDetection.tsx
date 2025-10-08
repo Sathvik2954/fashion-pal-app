@@ -29,6 +29,8 @@ const PoseDetection = () => {
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const lastTempSizeRef = useRef<string | null>(null);
   const sameTempSizeCountRef = useRef<number>(0);
+  const cameraRef = useRef<any>(null);
+  const poseRef = useRef<any>(null);
 
   const F = 500;
   const REAL_EYE_DIST = 6.3;
@@ -153,6 +155,17 @@ const PoseDetection = () => {
           setFinalMeasurements(finalData);
           setIsStable(true);
           setShowResultDialog(true);
+          
+          // Stop camera after 6 seconds (1 second after locking)
+          setTimeout(() => {
+            if (cameraRef.current) {
+              cameraRef.current.stop();
+            }
+            if (poseRef.current) {
+              poseRef.current.close();
+            }
+          }, 1000);
+          
           return; // Stop processing once locked
         }
       } else {
@@ -203,10 +216,11 @@ const PoseDetection = () => {
       });
 
       pose.onResults(onResults);
+      poseRef.current = pose;
 
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (videoRef.current) {
+          if (videoRef.current && !isStable) {
             await pose.send({ image: videoRef.current });
           }
         },
@@ -215,6 +229,7 @@ const PoseDetection = () => {
       });
 
       await camera.start();
+      cameraRef.current = camera;
       setIsActive(true);
     } catch (error) {
       console.error('Error starting camera:', error);
@@ -222,6 +237,15 @@ const PoseDetection = () => {
   };
 
   const reset = () => {
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+      cameraRef.current = null;
+    }
+    if (poseRef.current) {
+      poseRef.current.close();
+      poseRef.current = null;
+    }
+    setIsActive(false);
     setIsStable(false);
     setFinalMeasurements(null);
     setMeasurements(null);
