@@ -25,27 +25,75 @@ const PoseDetection = () => {
   const [finalMeasurements, setFinalMeasurements] = useState<MeasurementData | null>(null);
   const [stabilityBuffer, setStabilityBuffer] = useState<number[]>([]);
   const [showResultDialog, setShowResultDialog] = useState(false);
+  const [countdown, setCountdown] = useState<number>(0);
   const cameraRef = useRef<any>(null);
   const poseRef = useRef<any>(null);
   const isLockedRef = useRef<boolean>(false);
   const startTimeRef = useRef<number>(0);
   const lockTimerRef = useRef<any>(null);
+  const countdownIntervalRef = useRef<any>(null);
 
   const F = 500;
   const REAL_EYE_DIST = 6.3;
   const SCALING_FACTOR = 1.48;
   const LOCK_DURATION = 5000; // Lock after 5 seconds
 
-
   const calculateDistance = (point1: [number, number], point2: [number, number]): number => {
     return Math.sqrt(Math.pow(point1[0] - point2[0], 2) + Math.pow(point1[1] - point2[1], 2));
+  };
+
+  const stopCameraProcessing = () => {
+    console.log('Stopping camera processing...');
+    
+    // Clear timers first
+    if (lockTimerRef.current) {
+      clearTimeout(lockTimerRef.current);
+      lockTimerRef.current = null;
+    }
+    
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    
+    // Stop pose detection
+    if (poseRef.current) {
+      try {
+        poseRef.current.close();
+      } catch (error) {
+        console.error('Error closing pose:', error);
+      }
+      poseRef.current = null;
+    }
+    
+    // Stop camera
+    if (cameraRef.current) {
+      try {
+        cameraRef.current.stop();
+      } catch (error) {
+        console.error('Error stopping camera:', error);
+      }
+      cameraRef.current = null;
+    }
+    
+    // Stop media stream
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => {
+        track.stop();
+      });
+      videoRef.current.srcObject = null;
+    }
   };
 
   const onResults = (results: any) => {
     if (!canvasRef.current || !videoRef.current) return;
     
     // Immediately stop processing if locked
-    if (isLockedRef.current) return;
+    if (isLockedRef.current) {
+      console.log('Skipping frame processing - locked');
+      return;
+    }
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d')!;
@@ -115,15 +163,11 @@ const PoseDetection = () => {
       };
       setMeasurements(currentMeasurements);
 
-      // Show countdown
-      const elapsed = Date.now() - startTimeRef.current;
-      const remaining = Math.max(0, LOCK_DURATION - elapsed);
-      const secondsLeft = Math.ceil(remaining / 1000);
-      
-      if (secondsLeft > 0) {
+      // Show countdown from state
+      if (countdown > 0) {
         ctx.fillStyle = 'yellow';
         ctx.font = 'bold 24px Arial';
-        ctx.fillText(`⏱️ Locking in: ${secondsLeft}s`, 20, 150);
+        ctx.fillText(`⏱️ Locking in: ${countdown}s`, 20, 150);
       }
 
       // Display live measurements
@@ -143,6 +187,12 @@ const PoseDetection = () => {
     if (!videoRef.current) return;
 
     try {
+      // Reset all states
+      reset();
+      setIsActive(true);
+      isLockedRef.current = false;
+      setCountdown(Math.ceil(LOCK_DURATION / 1000));
+
       const pose = new Pose({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
       });
@@ -161,8 +211,12 @@ const PoseDetection = () => {
 
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (videoRef.current && !isLockedRef.current) {
-            await pose.send({ image: videoRef.current });
+          if (videoRef.current && poseRef.current && !isLockedRef.current) {
+            try {
+              await poseRef.current.send({ image: videoRef.current });
+            } catch (error) {
+              console.error('Error processing frame:', error);
+            }
           }
         },
         width: 640,
@@ -171,11 +225,26 @@ const PoseDetection = () => {
 
       await camera.start();
       cameraRef.current = camera;
-      setIsActive(true);
       
-      // Start timer - lock after exactly 5 seconds
+      // Start countdown timer
       startTimeRef.current = Date.now();
+      
+      // Update countdown every second
+      countdownIntervalRef.current = setInterval(() => {
+        const elapsed = Date.now() - startTimeRef.current;
+        const remaining = Math.max(0, LOCK_DURATION - elapsed);
+        const secondsLeft = Math.ceil(remaining / 1000);
+        setCountdown(secondsLeft);
+      }, 100);
+
+      // Set the main lock timer
       lockTimerRef.current = setTimeout(() => {
+        console.log('5-second lock triggered - locking measurements');
+        
+        // Set locked state
+        isLockedRef.current = true;
+        
+        // Use current measurements or create fallback
         if (measurements) {
           const finalData: MeasurementData = {
             distance: measurements.distance,
@@ -183,64 +252,92 @@ const PoseDetection = () => {
             torsoHeight: measurements.torsoHeight,
             predictedSize: measurements.predictedSize
           };
-          
-          isLockedRef.current = true;
           setFinalMeasurements(finalData);
-          setIsStable(true);
-          setShowResultDialog(true);
-          
-          // Stop camera after 1 more second
-          setTimeout(() => {
-            if (cameraRef.current) {
-              cameraRef.current.stop();
-            }
-            if (poseRef.current) {
-              poseRef.current.close();
-            }
-            if (videoRef.current && videoRef.current.srcObject) {
-              const stream = videoRef.current.srcObject as MediaStream;
-              stream.getTracks().forEach(track => track.stop());
-            }
-          }, 1000);
+        } else {
+          // Fallback if no measurements available
+          const fallbackData: MeasurementData = {
+            distance: 0,
+            shoulderWidth: 0,
+            torsoHeight: 0,
+            predictedSize: 'M' // Default size
+          };
+          setFinalMeasurements(fallbackData);
         }
+        
+        setIsStable(true);
+        setShowResultDialog(true);
+        
+        // Stop camera processing immediately
+        stopCameraProcessing();
+        
       }, LOCK_DURATION);
+
     } catch (error) {
       console.error('Error starting camera:', error);
+      setIsActive(false);
     }
   };
 
   const reset = () => {
+    console.log('Resetting pose detection...');
+    
+    // Clear all timers
     if (lockTimerRef.current) {
       clearTimeout(lockTimerRef.current);
+      lockTimerRef.current = null;
     }
-    if (cameraRef.current) {
-      cameraRef.current.stop();
-      cameraRef.current = null;
+    
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
     }
-    if (poseRef.current) {
-      poseRef.current.close();
-      poseRef.current = null;
-    }
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-    }
+    
+    // Stop camera processing
+    stopCameraProcessing();
+    
+    // Reset all states
     isLockedRef.current = false;
     setIsActive(false);
     setIsStable(false);
     setFinalMeasurements(null);
     setMeasurements(null);
     setShowResultDialog(false);
+    setCountdown(0);
+    
+    // Clear canvas
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    }
   };
 
   const handleTryAgain = () => {
     setShowResultDialog(false);
-    reset();
+    setTimeout(() => {
+      reset();
+    }, 300);
   };
 
   const handleUseSize = () => {
     setShowResultDialog(false);
+    // You can add additional logic here to use the size
+    console.log('Using size:', finalMeasurements?.predictedSize);
   };
+
+  // Cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      if (lockTimerRef.current) {
+        clearTimeout(lockTimerRef.current);
+      }
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+      stopCameraProcessing();
+    };
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -290,6 +387,14 @@ const PoseDetection = () => {
               </Button>
             )}
           </div>
+
+          {isActive && countdown > 0 && (
+            <div className="text-center">
+              <Badge variant="secondary" className="text-lg py-2 px-4">
+                ⏱️ Locking in: {countdown}s
+              </Badge>
+            </div>
+          )}
 
           <div className="bg-muted/50 rounded-lg p-4">
             <h3 className="font-semibold mb-2">Instructions:</h3>
@@ -357,7 +462,7 @@ const PoseDetection = () => {
                 </div>
 
                 <p className="text-center text-sm text-muted-foreground">
-                  Measurements locked after detecting stillness for 5 seconds.
+                  Measurements locked after 5 seconds of detection.
                 </p>
               </div>
 
