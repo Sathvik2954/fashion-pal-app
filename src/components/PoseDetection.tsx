@@ -118,31 +118,6 @@ const PoseDetection = () => {
       const newBuffer = [...stabilityBuffer, quantizedShoulder].slice(-10);
       setStabilityBuffer(newBuffer);
 
-      if (checkStability(newBuffer)) {
-        const now = Date.now();
-        const timeSinceLastMovement = now - lastMovementTimeRef.current;
-        const remaining = Math.max(0, STABILITY_DURATION - timeSinceLastMovement);
-        setTimeRemaining(remaining);
-
-        if (timeSinceLastMovement > STABILITY_DURATION) {
-          const predictedSize = estimateSize(shoulderWidth + 2, torsoHeight);
-          const finalData: MeasurementData = {
-            distance,
-            shoulderWidth,
-            torsoHeight,
-            predictedSize
-          };
-          setFinalMeasurements(finalData);
-          setIsStable(true);
-          setShowResultDialog(true);
-        }
-      } else {
-        lastMovementTimeRef.current = Date.now();
-        setTimeRemaining(STABILITY_DURATION);
-        sameTempSizeCountRef.current = 0;
-        lastTempSizeRef.current = null;
-      }
-
       const currentMeasurements: MeasurementData = {
         distance,
         shoulderWidth,
@@ -151,11 +126,23 @@ const PoseDetection = () => {
       };
       setMeasurements(currentMeasurements);
 
-      const tempSize = currentMeasurements.predictedSize;
-      if (lastTempSizeRef.current === tempSize) {
-        sameTempSizeCountRef.current += 1;
+      // Check for stillness and lock after 5 seconds
+      if (checkStability(newBuffer)) {
+        const now = Date.now();
+        const timeSinceLastMovement = now - lastMovementTimeRef.current;
+        const remaining = Math.max(0, STABILITY_DURATION - timeSinceLastMovement);
+        setTimeRemaining(remaining);
 
-        if (sameTempSizeCountRef.current >= 5) {
+        // Display countdown on canvas
+        ctx.fillStyle = 'yellow';
+        ctx.font = 'bold 24px Arial';
+        const secondsLeft = Math.ceil(remaining / 1000);
+        if (secondsLeft > 0) {
+          ctx.fillText(`🔒 Hold Still: ${secondsLeft}s`, 20, 150);
+        }
+
+        // Lock measurements after 5 seconds of stillness
+        if (timeSinceLastMovement >= STABILITY_DURATION) {
           const predictedSize = estimateSize(shoulderWidth + 2, torsoHeight);
           const finalData: MeasurementData = {
             distance,
@@ -166,12 +153,15 @@ const PoseDetection = () => {
           setFinalMeasurements(finalData);
           setIsStable(true);
           setShowResultDialog(true);
+          return; // Stop processing once locked
         }
       } else {
-        lastTempSizeRef.current = tempSize;
-        sameTempSizeCountRef.current = 1;
+        // Reset timer if movement detected
+        lastMovementTimeRef.current = Date.now();
+        setTimeRemaining(STABILITY_DURATION);
       }
 
+      // Display live measurements
       ctx.fillStyle = 'lime';
       ctx.font = '18px Arial';
       ctx.fillText(`Distance: ${Math.round(distance)} cm`, 20, 30);
@@ -309,13 +299,8 @@ const PoseDetection = () => {
               <li>• Stay still for 5 seconds to lock in measurements</li>
               <li>• Move back if you see a warning message</li>
               {timeRemaining > 0 && timeRemaining < STABILITY_DURATION && (
-                <li className="text-primary font-semibold">
-                  • Hold still for {Math.ceil(timeRemaining / 1000)} more seconds...
-                </li>
-              )}
-              {measurements && sameTempSizeCountRef.current > 0 && (
-                <li className="text-primary font-semibold">
-                  • Size consistency: {sameTempSizeCountRef.current}/5 times
+                <li className="text-primary font-semibold animate-pulse">
+                  ⏱️ Hold still for {Math.ceil(timeRemaining / 1000)} more seconds to lock measurements...
                 </li>
               )}
             </ul>
