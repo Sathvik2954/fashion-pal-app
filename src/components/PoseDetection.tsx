@@ -25,30 +25,17 @@ const PoseDetection = () => {
   const [finalMeasurements, setFinalMeasurements] = useState<MeasurementData | null>(null);
   const [stabilityBuffer, setStabilityBuffer] = useState<number[]>([]);
   const [showResultDialog, setShowResultDialog] = useState(false);
-  const lastMovementTimeRef = useRef(Date.now());
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const lastTempSizeRef = useRef<string | null>(null);
-  const sameTempSizeCountRef = useRef<number>(0);
   const cameraRef = useRef<any>(null);
   const poseRef = useRef<any>(null);
   const isLockedRef = useRef<boolean>(false);
+  const startTimeRef = useRef<number>(0);
+  const lockTimerRef = useRef<any>(null);
 
   const F = 500;
   const REAL_EYE_DIST = 6.3;
   const SCALING_FACTOR = 1.48;
-  const STABILITY_TOLERANCE = 3.0;
-  const STABILITY_DURATION = 5000;
+  const LOCK_DURATION = 5000; // Lock after 5 seconds
 
-  const checkStability = (measurements: number[], tolerance = STABILITY_TOLERANCE): boolean => {
-    if (measurements.length < 8) return false;
-
-    const recent = measurements.slice(-8);
-    const avg = recent.reduce((sum, val) => sum + val, 0) / recent.length;
-    const variance = recent.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / recent.length;
-    const stdDev = Math.sqrt(variance);
-
-    return stdDev < tolerance;
-  };
 
   const calculateDistance = (point1: [number, number], point2: [number, number]): number => {
     return Math.sqrt(Math.pow(point1[0] - point2[0], 2) + Math.pow(point1[1] - point2[1], 2));
@@ -120,70 +107,23 @@ const PoseDetection = () => {
       const pixelTorsoHeight = calculateDistance(shoulderMid, hipMid);
       const torsoHeight = (pixelTorsoHeight * distance) / F;
 
-      const quantizedShoulder = Math.round(shoulderWidth * 2) / 2;
-      const newBuffer = [...stabilityBuffer, quantizedShoulder].slice(-10);
-      setStabilityBuffer(newBuffer);
-
       const currentMeasurements: MeasurementData = {
         distance,
         shoulderWidth,
         torsoHeight,
-        predictedSize: estimateSize(shoulderWidth, torsoHeight)
+        predictedSize: estimateSize(shoulderWidth + 2, torsoHeight)
       };
       setMeasurements(currentMeasurements);
 
-      // Check for stillness and lock after 5 seconds
-      if (checkStability(newBuffer)) {
-        const now = Date.now();
-        const timeSinceLastMovement = now - lastMovementTimeRef.current;
-        const remaining = Math.max(0, STABILITY_DURATION - timeSinceLastMovement);
-        setTimeRemaining(remaining);
-
-        // Display countdown on canvas
+      // Show countdown
+      const elapsed = Date.now() - startTimeRef.current;
+      const remaining = Math.max(0, LOCK_DURATION - elapsed);
+      const secondsLeft = Math.ceil(remaining / 1000);
+      
+      if (secondsLeft > 0) {
         ctx.fillStyle = 'yellow';
         ctx.font = 'bold 24px Arial';
-        const secondsLeft = Math.ceil(remaining / 1000);
-        if (secondsLeft > 0) {
-          ctx.fillText(`🔒 Hold Still: ${secondsLeft}s`, 20, 150);
-        }
-
-        // Lock measurements after 5 seconds of stillness
-        if (timeSinceLastMovement >= STABILITY_DURATION) {
-          const predictedSize = estimateSize(shoulderWidth + 2, torsoHeight);
-          const finalData: MeasurementData = {
-            distance,
-            shoulderWidth,
-            torsoHeight,
-            predictedSize
-          };
-          
-          // IMMEDIATELY lock to prevent further processing
-          isLockedRef.current = true;
-          setFinalMeasurements(finalData);
-          setIsStable(true);
-          setShowResultDialog(true);
-          
-          // Stop camera after 1 more second (total 6 seconds)
-          setTimeout(() => {
-            if (cameraRef.current) {
-              cameraRef.current.stop();
-            }
-            if (poseRef.current) {
-              poseRef.current.close();
-            }
-            if (videoRef.current && videoRef.current.srcObject) {
-              const stream = videoRef.current.srcObject as MediaStream;
-              stream.getTracks().forEach(track => track.stop());
-            }
-          }, 1000);
-          
-          ctx.restore();
-          return; // Stop processing once locked
-        }
-      } else {
-        // Reset timer if movement detected
-        lastMovementTimeRef.current = Date.now();
-        setTimeRemaining(STABILITY_DURATION);
+        ctx.fillText(`⏱️ Locking in: ${secondsLeft}s`, 20, 150);
       }
 
       // Display live measurements
@@ -232,12 +172,47 @@ const PoseDetection = () => {
       await camera.start();
       cameraRef.current = camera;
       setIsActive(true);
+      
+      // Start timer - lock after exactly 5 seconds
+      startTimeRef.current = Date.now();
+      lockTimerRef.current = setTimeout(() => {
+        if (measurements) {
+          const finalData: MeasurementData = {
+            distance: measurements.distance,
+            shoulderWidth: measurements.shoulderWidth,
+            torsoHeight: measurements.torsoHeight,
+            predictedSize: measurements.predictedSize
+          };
+          
+          isLockedRef.current = true;
+          setFinalMeasurements(finalData);
+          setIsStable(true);
+          setShowResultDialog(true);
+          
+          // Stop camera after 1 more second
+          setTimeout(() => {
+            if (cameraRef.current) {
+              cameraRef.current.stop();
+            }
+            if (poseRef.current) {
+              poseRef.current.close();
+            }
+            if (videoRef.current && videoRef.current.srcObject) {
+              const stream = videoRef.current.srcObject as MediaStream;
+              stream.getTracks().forEach(track => track.stop());
+            }
+          }, 1000);
+        }
+      }, LOCK_DURATION);
     } catch (error) {
       console.error('Error starting camera:', error);
     }
   };
 
   const reset = () => {
+    if (lockTimerRef.current) {
+      clearTimeout(lockTimerRef.current);
+    }
     if (cameraRef.current) {
       cameraRef.current.stop();
       cameraRef.current = null;
@@ -255,12 +230,7 @@ const PoseDetection = () => {
     setIsStable(false);
     setFinalMeasurements(null);
     setMeasurements(null);
-    setStabilityBuffer([]);
     setShowResultDialog(false);
-    lastMovementTimeRef.current = Date.now();
-    setTimeRemaining(STABILITY_DURATION);
-    lastTempSizeRef.current = null;
-    sameTempSizeCountRef.current = 0;
   };
 
   const handleTryAgain = () => {
@@ -326,13 +296,8 @@ const PoseDetection = () => {
             <ul className="text-sm space-y-1 text-muted-foreground">
               <li>• Stand facing the camera with arms at your sides</li>
               <li>• Make sure your full torso is visible (shoulders to hips)</li>
-              <li>• Stay still for 5 seconds to lock in measurements</li>
+              <li>• Measurements will automatically lock after 5 seconds</li>
               <li>• Move back if you see a warning message</li>
-              {timeRemaining > 0 && timeRemaining < STABILITY_DURATION && (
-                <li className="text-primary font-semibold animate-pulse">
-                  ⏱️ Hold still for {Math.ceil(timeRemaining / 1000)} more seconds to lock measurements...
-                </li>
-              )}
             </ul>
           </div>
 
