@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Camera as CameraIcon, RotateCcw, CheckCircle, Trophy, RotateCcw as TryAgainIcon } from 'lucide-react';
+import { Camera as CameraIcon, RotateCcw, CheckCircle, Trophy, RotateCcw as TryAgainIcon, AlertCircle } from 'lucide-react';
 
 interface MeasurementData {
   distance: number;
@@ -23,20 +23,23 @@ const PoseDetection = () => {
   const [measurements, setMeasurements] = useState<MeasurementData | null>(null);
   const [isStable, setIsStable] = useState(false);
   const [finalMeasurements, setFinalMeasurements] = useState<MeasurementData | null>(null);
-  const [stabilityBuffer, setStabilityBuffer] = useState<number[]>([]);
   const [showResultDialog, setShowResultDialog] = useState(false);
   const [countdown, setCountdown] = useState<number>(0);
+  const [error, setError] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+  
   const cameraRef = useRef<any>(null);
   const poseRef = useRef<any>(null);
   const isLockedRef = useRef<boolean>(false);
   const startTimeRef = useRef<number>(0);
   const lockTimerRef = useRef<any>(null);
   const countdownIntervalRef = useRef<any>(null);
+  const animationFrameRef = useRef<number>(0);
 
   const F = 500;
   const REAL_EYE_DIST = 6.3;
   const SCALING_FACTOR = 1.48;
-  const LOCK_DURATION = 5000; // Lock after 5 seconds
+  const LOCK_DURATION = 5000;
 
   const calculateDistance = (point1: [number, number], point2: [number, number]): number => {
     return Math.sqrt(Math.pow(point1[0] - point2[0], 2) + Math.pow(point1[1] - point2[1], 2));
@@ -45,7 +48,7 @@ const PoseDetection = () => {
   const stopCameraProcessing = () => {
     console.log('Stopping camera processing...');
     
-    // Clear timers first
+    // Clear all timers and intervals
     if (lockTimerRef.current) {
       clearTimeout(lockTimerRef.current);
       lockTimerRef.current = null;
@@ -54,6 +57,12 @@ const PoseDetection = () => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
+    }
+    
+    // Cancel animation frame
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = 0;
     }
     
     // Stop pose detection
@@ -87,23 +96,22 @@ const PoseDetection = () => {
   };
 
   const onResults = (results: any) => {
-    if (!canvasRef.current || !videoRef.current) return;
-    
-    // Immediately stop processing if locked
-    if (isLockedRef.current) {
-      console.log('Skipping frame processing - locked');
-      return;
-    }
+    if (!canvasRef.current || !videoRef.current || isLockedRef.current) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
 
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    
+    // Only draw the video if we have valid dimensions
+    if (canvas.width > 0 && canvas.height > 0) {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    }
 
     if (results.poseLandmarks) {
       const landmarks = results.poseLandmarks;
@@ -119,82 +127,100 @@ const PoseDetection = () => {
       const leftHip = landmarks[23];
       const rightHip = landmarks[24];
 
-      const leftEyePos: [number, number] = [leftEye.x * width, leftEye.y * height];
-      const rightEyePos: [number, number] = [rightEye.x * width, rightEye.y * height];
-      const pixelEyeDistance = calculateDistance(leftEyePos, rightEyePos);
+      // Check visibility of key points
+      if (leftEye && rightEye && leftShoulder && rightShoulder && leftHip && rightHip) {
+        const leftEyePos: [number, number] = [leftEye.x * width, leftEye.y * height];
+        const rightEyePos: [number, number] = [rightEye.x * width, rightEye.y * height];
+        const pixelEyeDistance = calculateDistance(leftEyePos, rightEyePos);
 
-      if (pixelEyeDistance === 0) {
-        ctx.restore();
-        return;
+        if (pixelEyeDistance === 0) {
+          ctx.restore();
+          return;
+        }
+
+        const distance = (REAL_EYE_DIST * F) / pixelEyeDistance;
+
+        // Check if shoulders and hips are visible
+        if (leftShoulder.visibility < 0.5 || rightShoulder.visibility < 0.5 ||
+            leftHip.visibility < 0.5 || rightHip.visibility < 0.5) {
+          ctx.fillStyle = 'red';
+          ctx.font = '20px Arial';
+          ctx.fillText('⚠️ Move back a little', 20, 50);
+          ctx.restore();
+          return;
+        }
+
+        const leftShoulderPos: [number, number] = [leftShoulder.x * width, leftShoulder.y * height];
+        const rightShoulderPos: [number, number] = [rightShoulder.x * width, rightShoulder.y * height];
+        const pixelShoulderDistance = calculateDistance(leftShoulderPos, rightShoulderPos) * SCALING_FACTOR;
+        const shoulderWidth = (pixelShoulderDistance * distance) / F;
+
+        const shoulderMid: [number, number] = [
+          (leftShoulder.x + rightShoulder.x) / 2 * width,
+          (leftShoulder.y + rightShoulder.y) / 2 * height
+        ];
+        const hipMid: [number, number] = [
+          (leftHip.x + rightHip.x) / 2 * width,
+          (leftHip.y + rightHip.y) / 2 * height
+        ];
+        const pixelTorsoHeight = calculateDistance(shoulderMid, hipMid);
+        const torsoHeight = (pixelTorsoHeight * distance) / F;
+
+        const currentMeasurements: MeasurementData = {
+          distance,
+          shoulderWidth,
+          torsoHeight,
+          predictedSize: estimateSize(shoulderWidth + 2, torsoHeight)
+        };
+        setMeasurements(currentMeasurements);
+
+        // Display measurements on canvas
+        ctx.fillStyle = 'lime';
+        ctx.font = '18px Arial';
+        ctx.fillText(`Distance: ${Math.round(distance)} cm`, 20, 30);
+        ctx.fillText(`Shoulder: ${shoulderWidth.toFixed(1)} cm`, 20, 60);
+        ctx.fillText(`Torso: ${torsoHeight.toFixed(1)} cm`, 20, 90);
+        ctx.fillStyle = 'orange';
+        ctx.fillText(`Temp Size: ${currentMeasurements.predictedSize}`, 20, 120);
+
+        // Show countdown
+        if (countdown > 0) {
+          ctx.fillStyle = 'yellow';
+          ctx.font = 'bold 24px Arial';
+          ctx.fillText(`⏱️ Locking in: ${countdown}s`, 20, 150);
+        }
       }
-
-      const distance = (REAL_EYE_DIST * F) / pixelEyeDistance;
-
-      if (leftShoulder.visibility < 0.5 || rightShoulder.visibility < 0.5 ||
-          leftHip.visibility < 0.5 || rightHip.visibility < 0.5) {
-        ctx.fillStyle = 'red';
-        ctx.font = '20px Arial';
-        ctx.fillText('⚠️ Move back a little', 20, 50);
-        ctx.restore();
-        return;
-      }
-
-      const leftShoulderPos: [number, number] = [leftShoulder.x * width, leftShoulder.y * height];
-      const rightShoulderPos: [number, number] = [rightShoulder.x * width, rightShoulder.y * height];
-      const pixelShoulderDistance = calculateDistance(leftShoulderPos, rightShoulderPos) * SCALING_FACTOR;
-      const shoulderWidth = (pixelShoulderDistance * distance) / F;
-
-      const shoulderMid: [number, number] = [
-        (leftShoulder.x + rightShoulder.x) / 2 * width,
-        (leftShoulder.y + rightShoulder.y) / 2 * height
-      ];
-      const hipMid: [number, number] = [
-        (leftHip.x + rightHip.x) / 2 * width,
-        (leftHip.y + rightHip.y) / 2 * height
-      ];
-      const pixelTorsoHeight = calculateDistance(shoulderMid, hipMid);
-      const torsoHeight = (pixelTorsoHeight * distance) / F;
-
-      const currentMeasurements: MeasurementData = {
-        distance,
-        shoulderWidth,
-        torsoHeight,
-        predictedSize: estimateSize(shoulderWidth + 2, torsoHeight)
-      };
-      setMeasurements(currentMeasurements);
-
-      // Show countdown from state
-      if (countdown > 0) {
-        ctx.fillStyle = 'yellow';
-        ctx.font = 'bold 24px Arial';
-        ctx.fillText(`⏱️ Locking in: ${countdown}s`, 20, 150);
-      }
-
-      // Display live measurements
-      ctx.fillStyle = 'lime';
-      ctx.font = '18px Arial';
-      ctx.fillText(`Distance: ${Math.round(distance)} cm`, 20, 30);
-      ctx.fillText(`Shoulder: ${shoulderWidth.toFixed(1)} cm`, 20, 60);
-      ctx.fillText(`Torso: ${torsoHeight.toFixed(1)} cm`, 20, 90);
-      ctx.fillStyle = 'orange';
-      ctx.fillText(`Temp Size: ${currentMeasurements.predictedSize}`, 20, 120);
     }
 
     ctx.restore();
   };
 
   const startCamera = async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current) {
+      setError('Video element not found');
+      return;
+    }
 
     try {
+      setIsLoading(true);
+      setError('');
+      
       // Reset all states
-      reset();
-      setIsActive(true);
       isLockedRef.current = false;
+      setIsStable(false);
+      setFinalMeasurements(null);
+      setMeasurements(null);
+      setShowResultDialog(false);
       setCountdown(Math.ceil(LOCK_DURATION / 1000));
 
+      console.log('Initializing MediaPipe Pose...');
+
+      // Initialize Pose
       const pose = new Pose({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        locateFile: (file) => {
+          console.log('Loading file:', file);
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+        }
       });
 
       pose.setOptions({
@@ -209,6 +235,9 @@ const PoseDetection = () => {
       pose.onResults(onResults);
       poseRef.current = pose;
 
+      console.log('Starting camera...');
+
+      // Initialize Camera
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
           if (videoRef.current && poseRef.current && !isLockedRef.current) {
@@ -225,7 +254,11 @@ const PoseDetection = () => {
 
       await camera.start();
       cameraRef.current = camera;
-      
+      setIsActive(true);
+      setIsLoading(false);
+
+      console.log('Camera started successfully');
+
       // Start countdown timer
       startTimeRef.current = Date.now();
       
@@ -244,22 +277,16 @@ const PoseDetection = () => {
         // Set locked state
         isLockedRef.current = true;
         
-        // Use current measurements or create fallback
+        // Use current measurements
         if (measurements) {
-          const finalData: MeasurementData = {
-            distance: measurements.distance,
-            shoulderWidth: measurements.shoulderWidth,
-            torsoHeight: measurements.torsoHeight,
-            predictedSize: measurements.predictedSize
-          };
-          setFinalMeasurements(finalData);
+          setFinalMeasurements(measurements);
         } else {
           // Fallback if no measurements available
           const fallbackData: MeasurementData = {
             distance: 0,
             shoulderWidth: 0,
             torsoHeight: 0,
-            predictedSize: 'M' // Default size
+            predictedSize: 'M'
           };
           setFinalMeasurements(fallbackData);
         }
@@ -267,32 +294,21 @@ const PoseDetection = () => {
         setIsStable(true);
         setShowResultDialog(true);
         
-        // Stop camera processing immediately
+        // Stop camera processing
         stopCameraProcessing();
         
       }, LOCK_DURATION);
 
     } catch (error) {
       console.error('Error starting camera:', error);
+      setError(`Failed to start camera: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setIsLoading(false);
       setIsActive(false);
     }
   };
 
   const reset = () => {
     console.log('Resetting pose detection...');
-    
-    // Clear all timers
-    if (lockTimerRef.current) {
-      clearTimeout(lockTimerRef.current);
-      lockTimerRef.current = null;
-    }
-    
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
-    
-    // Stop camera processing
     stopCameraProcessing();
     
     // Reset all states
@@ -303,6 +319,7 @@ const PoseDetection = () => {
     setMeasurements(null);
     setShowResultDialog(false);
     setCountdown(0);
+    setError('');
     
     // Clear canvas
     if (canvasRef.current) {
@@ -322,19 +339,12 @@ const PoseDetection = () => {
 
   const handleUseSize = () => {
     setShowResultDialog(false);
-    // You can add additional logic here to use the size
     console.log('Using size:', finalMeasurements?.predictedSize);
   };
 
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
-      if (lockTimerRef.current) {
-        clearTimeout(lockTimerRef.current);
-      }
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-      }
       stopCameraProcessing();
     };
   }, []);
@@ -349,13 +359,22 @@ const PoseDetection = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="relative">
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="w-4 h-4" />
+                <span className="font-medium">Error: {error}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="relative bg-black rounded-lg overflow-hidden">
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="w-full max-w-2xl mx-auto rounded-lg"
+              className="w-full max-w-2xl mx-auto"
               style={{ display: isActive ? 'block' : 'none' }}
             />
             <canvas
@@ -365,20 +384,31 @@ const PoseDetection = () => {
             />
 
             {!isActive && (
-              <div className="bg-muted rounded-lg p-12 text-center">
-                <CameraIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground mb-4">
-                  Click below to start camera-based size detection
-                </p>
+              <div className="bg-muted rounded-lg p-12 text-center min-h-[300px] flex items-center justify-center">
+                <div>
+                  <CameraIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground mb-4">
+                    {isLoading ? 'Starting camera...' : 'Click below to start camera-based size detection'}
+                  </p>
+                  {isLoading && (
+                    <div className="flex justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
 
           <div className="flex gap-3 justify-center">
             {!isActive ? (
-              <Button onClick={startCamera} size="lg">
+              <Button 
+                onClick={startCamera} 
+                size="lg" 
+                disabled={isLoading}
+              >
                 <CameraIcon className="w-4 h-4 mr-2" />
-                Start Camera Detection
+                {isLoading ? 'Starting...' : 'Start Camera Detection'}
               </Button>
             ) : (
               <Button onClick={reset} variant="outline" size="lg">
@@ -390,7 +420,7 @@ const PoseDetection = () => {
 
           {isActive && countdown > 0 && (
             <div className="text-center">
-              <Badge variant="secondary" className="text-lg py-2 px-4">
+              <Badge variant="secondary" className="text-lg py-2 px-4 animate-pulse">
                 ⏱️ Locking in: {countdown}s
               </Badge>
             </div>
@@ -403,6 +433,7 @@ const PoseDetection = () => {
               <li>• Make sure your full torso is visible (shoulders to hips)</li>
               <li>• Measurements will automatically lock after 5 seconds</li>
               <li>• Move back if you see a warning message</li>
+              <li>• Ensure good lighting for better detection</li>
             </ul>
           </div>
 
@@ -446,20 +477,22 @@ const PoseDetection = () => {
                   </Badge>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center">
-                    <div className="text-lg font-bold text-primary">{finalMeasurements ? Math.round(finalMeasurements.distance) : 0}</div>
-                    <div className="text-xs text-muted-foreground">Distance (cm)</div>
+                {finalMeasurements && (
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-primary">{Math.round(finalMeasurements.distance)}</div>
+                      <div className="text-xs text-muted-foreground">Distance (cm)</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-primary">{finalMeasurements.shoulderWidth.toFixed(1)}</div>
+                      <div className="text-xs text-muted-foreground">Shoulder (cm)</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-primary">{finalMeasurements.torsoHeight.toFixed(1)}</div>
+                      <div className="text-xs text-muted-foreground">Torso (cm)</div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-bold text-primary">{finalMeasurements?.shoulderWidth.toFixed(1)}</div>
-                    <div className="text-xs text-muted-foreground">Shoulder (cm)</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-bold text-primary">{finalMeasurements?.torsoHeight.toFixed(1)}</div>
-                    <div className="text-xs text-muted-foreground">Torso (cm)</div>
-                  </div>
-                </div>
+                )}
 
                 <p className="text-center text-sm text-muted-foreground">
                   Measurements locked after 5 seconds of detection.
