@@ -31,6 +31,7 @@ const PoseDetection = () => {
   const sameTempSizeCountRef = useRef<number>(0);
   const cameraRef = useRef<any>(null);
   const poseRef = useRef<any>(null);
+  const isLockedRef = useRef<boolean>(false);
 
   const F = 500;
   const REAL_EYE_DIST = 6.3;
@@ -55,6 +56,9 @@ const PoseDetection = () => {
 
   const onResults = (results: any) => {
     if (!canvasRef.current || !videoRef.current) return;
+    
+    // Immediately stop processing if locked
+    if (isLockedRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d')!;
@@ -66,7 +70,7 @@ const PoseDetection = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
-    if (results.poseLandmarks && !isStable) {
+    if (results.poseLandmarks) {
       const landmarks = results.poseLandmarks;
       const { width, height } = canvas;
 
@@ -152,11 +156,14 @@ const PoseDetection = () => {
             torsoHeight,
             predictedSize
           };
+          
+          // IMMEDIATELY lock to prevent further processing
+          isLockedRef.current = true;
           setFinalMeasurements(finalData);
           setIsStable(true);
           setShowResultDialog(true);
           
-          // Stop camera after 6 seconds (1 second after locking)
+          // Stop camera after 1 more second (total 6 seconds)
           setTimeout(() => {
             if (cameraRef.current) {
               cameraRef.current.stop();
@@ -164,8 +171,13 @@ const PoseDetection = () => {
             if (poseRef.current) {
               poseRef.current.close();
             }
+            if (videoRef.current && videoRef.current.srcObject) {
+              const stream = videoRef.current.srcObject as MediaStream;
+              stream.getTracks().forEach(track => track.stop());
+            }
           }, 1000);
           
+          ctx.restore();
           return; // Stop processing once locked
         }
       } else {
@@ -182,17 +194,6 @@ const PoseDetection = () => {
       ctx.fillText(`Torso: ${torsoHeight.toFixed(1)} cm`, 20, 90);
       ctx.fillStyle = 'orange';
       ctx.fillText(`Temp Size: ${currentMeasurements.predictedSize}`, 20, 120);
-
-    } else if (isStable && finalMeasurements) {
-      ctx.fillStyle = 'lime';
-      ctx.font = '18px Arial';
-      ctx.fillText(`Distance: ${Math.round(finalMeasurements.distance)} cm`, 20, 30);
-      ctx.fillText(`Shoulder: ${finalMeasurements.shoulderWidth.toFixed(1)} cm`, 20, 60);
-      ctx.fillText(`Torso: ${finalMeasurements.torsoHeight.toFixed(1)} cm`, 20, 90);
-      ctx.fillStyle = 'orange';
-      ctx.fillText(`Predicted Size: ${finalMeasurements.predictedSize}`, 20, 120);
-      ctx.fillStyle = 'yellow';
-      ctx.fillText('✅ Locked after stillness', 20, 150);
     }
 
     ctx.restore();
@@ -220,7 +221,7 @@ const PoseDetection = () => {
 
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (videoRef.current && !isStable) {
+          if (videoRef.current && !isLockedRef.current) {
             await pose.send({ image: videoRef.current });
           }
         },
@@ -245,6 +246,11 @@ const PoseDetection = () => {
       poseRef.current.close();
       poseRef.current = null;
     }
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+    }
+    isLockedRef.current = false;
     setIsActive(false);
     setIsStable(false);
     setFinalMeasurements(null);
